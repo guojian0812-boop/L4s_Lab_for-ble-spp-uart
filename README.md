@@ -71,3 +71,15 @@ app/build/outputs/apk/release/app-release-unsigned.apk
 ## 上游项目与许可证
 
 本项目基于 [rt-bishop/Look4Sat](https://github.com/rt-bishop/Look4Sat) 的源码进行修改。感谢上游作者及贡献者。请保留仓库中的 `LICENSE` 和原始版权声明；本项目的许可证义务以该文件及上游许可证条款为准。
+
+## 应用界面展示
+
+![L4S-Labs 界面展示 1](docs/images/w1.jpg)
+
+![L4S-Labs 界面展示 2](docs/images/w2.jpg)
+
+![L4S-Labs 界面展示 3](docs/images/w3.jpg)
+
+![L4S-Labs 界面展示 4](docs/images/w4.jpg)
+
+![L4S-Labs 界面展示 5](docs/images/w5.jpg)
