@@ -66,6 +66,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import okhttp3.OkHttpClient
+import com.rtbishop.look4sat.core.data.framework.UsbSerialOutput
+import com.rtbishop.look4sat.core.domain.repository.ISerialOutput
 
 class MainContainer(private val context: Context) : IMainContainer {
 
@@ -74,6 +76,7 @@ class MainContainer(private val context: Context) : IMainContainer {
     private val mainHandler = CoroutineExceptionHandler { _, error -> println("MainHandler: $error") }
     override val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + mainHandler)
     override val settingsRepo = provideSettingsRepo()
+    private val serialOutput: ISerialOutput by lazy { UsbSerialOutput(context, appScope) }
     override val selectionRepo = provideSelectionRepo()
     override val satelliteRepo = provideSatelliteRepo()
     override val databaseRepo = provideDatabaseRepo()
@@ -95,11 +98,42 @@ class MainContainer(private val context: Context) : IMainContainer {
         val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         val rc = settingsRepo.rcSettings.value
         return BluetoothReporter(
-            manager,
-            CoroutineScope(Dispatchers.IO),
-            rc.bluetoothRotatorAddress,
-            rc.bluetoothFrequencyAddress
+            context = context.applicationContext,
+            bluetoothManager = manager,
+            reporterScope = CoroutineScope(Dispatchers.IO),
+            rotatorDeviceId = rc.bluetoothRotatorAddress,
+            frequencyDeviceId = rc.bluetoothFrequencyAddress
         )
+    }
+
+    override suspend fun connectBluetoothDevice(deviceId: String): Boolean {
+        val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        return BluetoothReporter.connectDevice(context.applicationContext, manager, deviceId)
+    }
+
+    override suspend fun disconnectBluetoothDevice(deviceId: String): Boolean {
+        val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        return BluetoothReporter.disconnectDevice(context.applicationContext, manager, deviceId)
+    }
+
+    override suspend fun scanBluetoothDevices(): List<Pair<String, String>> {
+        val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        return BluetoothReporter.scanDevices(context.applicationContext, manager)
+    }
+
+    override suspend fun isBluetoothDeviceConnected(deviceId: String): Boolean {
+        val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        return BluetoothReporter.isDeviceConnected(context.applicationContext, manager, deviceId)
+    }
+
+    override suspend fun sendBluetoothRaw(deviceId: String, bytes: ByteArray): Boolean {
+        val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        return BluetoothReporter.sendRawBytes(context.applicationContext, manager, deviceId, bytes)
+    }
+
+    override fun observeBluetoothReceivedBytes(deviceId: String): kotlinx.coroutines.flow.Flow<ByteArray> {
+        val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        return BluetoothReporter.observeReceivedBytes(context.applicationContext, manager, deviceId)
     }
 
     override fun provideNetworkReporter(): IReporter {
@@ -113,6 +147,8 @@ class MainContainer(private val context: Context) : IMainContainer {
             rc.frequencyOffsetHz
         )
     }
+
+    override fun provideSerialOutput(): ISerialOutput = serialOutput
 
     override fun provideTxRadioController(): IRadioController {
         val manager  = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager

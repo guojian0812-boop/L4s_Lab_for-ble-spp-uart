@@ -65,3 +65,54 @@ fastlane/readme.md
 /app/release/
 /.kotlin/sessions/
 .hermes/
+
+# Local Android and Gradle files
+local.properties
+.gradle/
+**/build/
+.idea/
+
+# Signing files and local secrets
+*.jks
+*.keystore
+key.properties
+
+# Generated Android packages
+*.apk
+*.aab
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Local patch backups
+.l4s-*-backup-*/
+**/.l4s-*-backup-*/
+
+# Local backup directories
+.l4s-before-rollback-*/
+.l4s-labs-dtrac-wire-format-fix-*/
+.l4s-*-backup-*/
+
+# L4S-Labs local patch and rollback backups
+/.l4s-*/
+
+# Local development environment and build artifacts
+/.gradle/
+/.kotlin/
+**/build/
+local.properties
+.idea/
+
+# Signing keys and sensitive configuration
+*.jks
+*.keystore
+key.properties
+
+# Generated Android packages
+*.apk
+*.aab
+
+# Python cache
+__pycache__/
+*.py[cod]

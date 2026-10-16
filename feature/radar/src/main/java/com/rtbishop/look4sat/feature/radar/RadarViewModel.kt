@@ -52,14 +52,17 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
+import java.util.ArrayDeque
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import kotlin.time.Duration.Companion.milliseconds
+import com.rtbishop.look4sat.core.domain.repository.ISerialOutput
 
 class RadarViewModel(
     private val bluetoothReporter: IReporter,
     private val networkReporter: IReporter,
+    private val serialOutput: ISerialOutput,
     private val satelliteRepo: ISatelliteRepo,
     private val settingsRepo: ISettingsRepo,
     private val sensorsRepo: ISensorsRepo,
@@ -78,6 +81,10 @@ class RadarViewModel(
     private var calculatorCatnum: Int? = null
     private var sstvDecoder: SstvDecoder? = null
     private var sstvRecordingJob: Job? = null
+    // Cache the exact audio stream fed to the decoder. Six minutes of mono PCM16 is about 32 MB.
+    private val sstvAudioLock = Any()
+    private val sstvAudioPcm16Chunks = ArrayDeque<ShortArray>()
+    private var sstvAudioSampleCount = 0L
     private var sensorCollectionJob: Job? = null
 
     // Celestial positions change slowly, recompute at most once per minute
@@ -325,12 +332,22 @@ class RadarViewModel(
             is RadarAction.SstvSaveImage -> {
                 if (_uiState.value.sstv.isSaving) return
                 val frame = _uiState.value.sstv.currentFrame ?: return
-                val pixels = frame.imagePixels ?: return
+
+                val useScopePreview = frame.scopePixels != null &&
+                    (frame.imagePixels == null || !frame.imageComplete)
+                val pixels = if (useScopePreview) {
+                    frame.scopePixels ?: frame.imagePixels ?: return
+                } else {
+                    frame.imagePixels ?: frame.scopePixels ?: return
+                }
+                val imageWidth = if (useScopePreview || frame.imagePixels == null) frame.scopeWidth else frame.imageWidth
+                val imageHeight = if (useScopePreview || frame.imagePixels == null) frame.scopeHeight else frame.imageHeight
+                if (imageWidth <= 0 || imageHeight <= 0 || pixels.size.toLong() < imageWidth.toLong() * imageHeight.toLong()) return
                 _uiState.update { it.copy(sstv = it.sstv.copy(isSaving = true)) }
                 viewModelScope.launch {
                     try {
-                        val saved = saveImage(pixels, frame.imageWidth, frame.imageHeight, frame.modeName)
-                        showToast(if (saved) action.successMessage else action.failureMessage)
+                        val imageResult = saveImage.saveImageOnly(pixels, imageWidth, imageHeight, frame.modeName)
+                        showToast(if (imageResult.saved) action.successMessage else "Image save failed: ${imageResult.error ?: action.failureMessage}")
                     } finally {
                         _uiState.update { it.copy(sstv = it.sstv.copy(isSaving = false)) }
                     }
@@ -343,6 +360,7 @@ class RadarViewModel(
             }
             RadarAction.SstvReset -> {
                 sstvDecoder?.clearPixels()
+                clearSstvAudio()
                 _uiState.update { it.copy(sstv = it.sstv.copy(currentFrame = null)) }
             }
             is RadarAction.ChangeCalculatorOffset -> {
@@ -383,6 +401,12 @@ class RadarViewModel(
             bluetoothReporter, orbitalPos,
             rc.bluetoothRotatorState, rc.bluetoothRotatorFormat,
             rc.bluetoothFrequencyState, rc.bluetoothFrequencyFormat
+        )
+        val serial = serialOutput.settings.value
+        sendReporterData(
+            serialOutput, orbitalPos,
+            serial.rotatorState, serial.rotatorFormat,
+            serial.frequencyState, serial.frequencyFormat
         )
     }
 
@@ -466,22 +490,65 @@ class RadarViewModel(
 
     private fun startSstvRecording() {
         if (sstvRecordingJob?.isActive == true) return
+        clearSstvAudio()
         initSstvDecoder()
         _uiState.update { it.copy(sstv = it.sstv.copy(status = SstvStatus.Recording)) }
         sstvRecordingJob = viewModelScope.launch {
             audioCapture.audioFlow().collect { buffer ->
+                appendSstvAudio(buffer)
                 sstvDecoder?.feedSamples(buffer)
             }
         }
     }
 
+    private fun appendSstvAudio(buffer: FloatArray) {
+        if (buffer.isEmpty()) return
+        val pcm16 = ShortArray(buffer.size) { index ->
+            val sample = buffer[index].coerceIn(-1.0f, 1.0f)
+            (sample * 32768.0f).toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+        }
+        synchronized(sstvAudioLock) {
+            sstvAudioPcm16Chunks.addLast(pcm16)
+            sstvAudioSampleCount += pcm16.size.toLong()
+            val maxSamples = audioCapture.sampleRate.toLong() * SSTV_AUDIO_BUFFER_SECONDS
+            while (sstvAudioSampleCount > maxSamples && sstvAudioPcm16Chunks.isNotEmpty()) {
+                sstvAudioSampleCount -= sstvAudioPcm16Chunks.removeFirst().size.toLong()
+            }
+        }
+    }
+    private fun clearSstvAudio() {
+        synchronized(sstvAudioLock) {
+            sstvAudioPcm16Chunks.clear()
+            sstvAudioSampleCount = 0L
+        }
+    }
     private fun stopSstvRecording() {
-        sstvRecordingJob?.cancel()
+        val recordingJob = sstvRecordingJob ?: return
+        recordingJob.cancel()
         sstvRecordingJob = null
         _uiState.update { it.copy(sstv = it.sstv.copy(status = SstvStatus.Idle)) }
+
+        // Snapshot before any next session can clear its rolling buffer.
+        val audioSnapshot = synchronized(sstvAudioLock) { sstvAudioPcm16Chunks.toList() }
+        if (audioSnapshot.isEmpty()) {
+            showToast("WAV save failed: no audio samples recorded")
+            return
+        }
+        val sstvState = _uiState.value.sstv
+        val modeName = sstvState.currentFrame?.modeName ?: sstvState.selectedMode
+        viewModelScope.launch {
+            val result = saveImage.saveAudioOnly(modeName, audioSnapshot, audioCapture.sampleRate)
+            if (result.saved) {
+                showToast("WAV saved: Recordings/L4SLABS/${result.filename}")
+            } else {
+                showToast("WAV save failed: ${result.error ?: "unknown reason"}")
+            }
+        }
     }
 
     companion object {
+        // Keep the latest six minutes to bound memory use during long decode sessions.
+        private const val SSTV_AUDIO_BUFFER_SECONDS = 6 * 60
         // SSTV Decoder Tuning Parameters
         // ==============================
         // SSTV_TARGET_RMS: Normalized signal level before FM demodulation.
@@ -514,7 +581,7 @@ class RadarViewModel(
         private val SSTV_LINE_RECOVERY_STRATEGY = LineRecoveryStrategy.Robot36Compatible
 
         // Debug: Return scope visualization in frames (increases per-frame memory usage).
-        private const val SSTV_INCLUDE_SCOPE = false
+        private const val SSTV_INCLUDE_SCOPE = true
 
         val CTCSS_TONES = listOf(
             67.0, 69.3, 71.9, 74.4, 77.0, 79.7, 82.5, 85.4, 88.5, 91.5,
@@ -528,6 +595,7 @@ class RadarViewModel(
                 RadarViewModel(
                     bluetoothReporter = container.provideBluetoothReporter(),
                     networkReporter = container.provideNetworkReporter(),
+                    serialOutput = container.provideSerialOutput(),
                     satelliteRepo = container.satelliteRepo,
                     settingsRepo = container.settingsRepo,
                     sensorsRepo = container.provideSensorsRepo(),

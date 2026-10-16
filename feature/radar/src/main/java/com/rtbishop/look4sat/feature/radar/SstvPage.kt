@@ -147,21 +147,40 @@ internal fun SstvPage(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        // Decoded image or placeholder — centered in available space
+        // Live rolling preview during reception. Switch to the stable full frame once
+        // the decoder marks it complete. Scope updates whenever new scan lines decode,
+        // including when reception starts midway through a transmission.
         val frame = sstv.currentFrame
-        val pixels = frame?.imagePixels
-        if (pixels != null && frame.imageWidth > 0 && frame.imageHeight > 0) {
-            val bitmap = remember(pixels, frame.imageWidth, frame.imageHeight) {
+        val showScopePreview = frame != null && frame.scopePixels != null &&
+            (frame.imagePixels == null || !frame.imageComplete)
+        val pixels = when {
+            frame == null -> null
+            showScopePreview -> frame.scopePixels
+            frame.imagePixels != null -> frame.imagePixels
+            else -> frame.scopePixels
+        }
+        val displayWidth = when {
+            frame == null -> 0
+            showScopePreview || frame.imagePixels == null -> frame.scopeWidth
+            else -> frame.imageWidth
+        }
+        val displayHeight = when {
+            frame == null -> 0
+            showScopePreview || frame.imagePixels == null -> frame.scopeHeight
+            else -> frame.imageHeight
+        }
+        if (pixels != null && displayWidth > 0 && displayHeight > 0) {
+            val bitmap = remember(pixels, displayWidth, displayHeight) {
                 Bitmap.createBitmap(
                     pixels,
-                    frame.imageWidth,
-                    frame.imageHeight,
+                    displayWidth,
+                    displayHeight,
                     Bitmap.Config.ARGB_8888
                 ).asImageBitmap()
             }
             Image(
                 bitmap = bitmap,
-                contentDescription = "Decoded SSTV image",
+                contentDescription = if (showScopePreview) "Live SSTV scan-line preview" else "Decoded SSTV image",
                 contentScale = ContentScale.Fit,
                 modifier = Modifier
                     .fillMaxSize()
@@ -175,7 +194,6 @@ internal fun SstvPage(
                 modifier = Modifier.align(Alignment.Center)
             )
         }
-
         val qualityText = frame?.let {
             val syncPct = (it.syncHitRate * 100f).roundToInt()
             val gainX10 = (it.appliedGain * 10f).roundToInt() / 10f
@@ -224,7 +242,7 @@ internal fun SstvPage(
                     modifier = Modifier.weight(1f).height(48.dp),
                     onClick = { showModeDialog.value = true },
                     colors = CardDefaults.elevatedCardColors(
-                        containerColor = MaterialTheme.colorScheme.surface
+                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
                     )
                 ) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -240,13 +258,15 @@ internal fun SstvPage(
                 // Reset button — clears decoder state and image
                 IconCard(
                     action = { onAction(RadarAction.SstvReset) },
-                    resId = R.drawable.ic_delete
+                    resId = R.drawable.ic_delete,
+                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
                 )
                 // Save button — always visible, enabled when there are pixels
                 IconCard(
                     action = requestSaveImage,
                     resId = R.drawable.ic_save,
-                    enabled = sstv.currentFrame?.imagePixels != null && !sstv.isSaving
+                    enabled = (sstv.currentFrame?.imagePixels != null || sstv.currentFrame?.scopePixels != null) && !sstv.isSaving,
+                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
                 )
                 // Record / Stop button
                 val playAction = {
@@ -256,8 +276,8 @@ internal fun SstvPage(
                     }
                 }
                 val playColors = CardDefaults.elevatedCardColors(
-                    containerColor = if (sstv.status == SstvStatus.Recording) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.surface
+                    containerColor = if (sstv.status == SstvStatus.Recording) MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
+                    else MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
                 )
                 val playIcon = if (sstv.status == SstvStatus.Recording) R.drawable.ic_pause else R.drawable.ic_play
                 ElevatedCard(modifier = Modifier.size(48.dp), onClick = playAction, colors = playColors) {

@@ -81,6 +81,7 @@ import com.rtbishop.look4sat.core.presentation.isVerticalLayout
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.rtbishop.look4sat.core.domain.repository.ISerialOutput
 
 @Composable
 fun SettingsDestination() {
@@ -88,12 +89,17 @@ fun SettingsDestination() {
     val container = (context.applicationContext as IContainerProvider).getMainContainer()
     val viewModel: SettingsViewModel = viewModel(factory = SettingsViewModel.factory(container))
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    SettingsScreen(uiState, viewModel::onAction)
+    SettingsScreen(uiState, viewModel::onAction, container::connectBluetoothDevice, container::disconnectBluetoothDevice, container::scanBluetoothDevices, container::isBluetoothDeviceConnected, container.provideSerialOutput(),
+        sendBluetoothRaw = container::sendBluetoothRaw,
+        observeBluetoothReceivedBytes = container::observeBluetoothReceivedBytes)
 }
 
 @Composable
-private fun SettingsScreen(uiState: SettingsState, onAction: (SettingsAction) -> Unit) {
+private fun SettingsScreen(uiState: SettingsState, onAction: (SettingsAction) -> Unit, connectBluetooth: suspend (String) -> Boolean, disconnectBluetooth: suspend (String) -> Boolean, scanBluetoothDevices: suspend () -> List<Pair<String, String>>, isBluetoothDeviceConnected: suspend (String) -> Boolean, serialOutput: ISerialOutput,
+        sendBluetoothRaw: suspend (String, ByteArray) -> Boolean,
+        observeBluetoothReceivedBytes: (String) -> kotlinx.coroutines.flow.Flow<ByteArray>) {
     val dialogs = rememberDialogVisibility()
+    var serialOutputVisible by rememberSaveable { mutableStateOf(false) }
     val permissions = rememberSettingsPermissions(
         sendAction = onAction,
         onBluetoothGranted = { dialogs.bluetooth = true },
@@ -101,6 +107,9 @@ private fun SettingsScreen(uiState: SettingsState, onAction: (SettingsAction) ->
     )
 
     // Dialogs
+    if (serialOutputVisible) {
+        SerialOutputDialog(serialOutput = serialOutput, onDismiss = { serialOutputVisible = false })
+    }
     if (dialogs.position) {
         PositionDialog(
             uiState.positionSettings.stationPos.latitude,
@@ -158,9 +167,20 @@ private fun SettingsScreen(uiState: SettingsState, onAction: (SettingsAction) ->
         )
     }
     if (dialogs.bluetooth) {
-        BluetoothOutputDialog(
-            initialSettings = uiState.rcSettings,
+        L4SBluetoothOutputDialog(
+            initialRotatorState = uiState.rcSettings.bluetoothRotatorState,
+            initialRotatorAddress = uiState.rcSettings.bluetoothRotatorAddress,
+            initialRotatorFormat = uiState.rcSettings.bluetoothRotatorFormat,
+            initialFrequencyState = uiState.rcSettings.bluetoothFrequencyState,
+            initialFrequencyAddress = uiState.rcSettings.bluetoothFrequencyAddress,
+            initialFrequencyFormat = uiState.rcSettings.bluetoothFrequencyFormat,
             onDismiss = { dialogs.bluetooth = false },
+            connectBluetooth = connectBluetooth,
+            disconnectBluetooth = disconnectBluetooth,
+            scanBluetoothDevices = scanBluetoothDevices,
+            isBluetoothDeviceConnected = isBluetoothDeviceConnected,
+            sendBluetoothRaw = sendBluetoothRaw,
+            observeBluetoothReceivedBytes = observeBluetoothReceivedBytes,
             onSave = { rotState, rotAddr, rotFmt, freqState, freqAddr, freqFmt ->
                 onAction(
                     SettingsAction.UpdateRC(
@@ -286,7 +306,8 @@ private fun SettingsScreen(uiState: SettingsState, onAction: (SettingsAction) ->
                 OutputCard(
                     onNetworkClick = permissions.launchNetwork,
                     onBluetoothClick = permissions.launchBluetooth,
-                    onRadioControlClick = { dialogs.radioControl = true }
+                    onRadioControlClick = { dialogs.radioControl = true },
+                    onSerialClick = { serialOutputVisible = true }
                 )
             }
             item(span = { GridItemSpan(maxLineSpan) }) {
@@ -434,13 +455,14 @@ private fun DataCard(
 
 @Preview(showBackground = true)
 @Composable
-private fun OutputCardPreview() = MainTheme { OutputCard({}, {}, {}) }
+private fun OutputCardPreview() = MainTheme { OutputCard({}, {}, {}, {}) }
 
 @Composable
 private fun OutputCard(
     onNetworkClick: () -> Unit,
     onBluetoothClick: () -> Unit,
-    onRadioControlClick: () -> Unit
+    onRadioControlClick: () -> Unit,
+    onSerialClick: () -> Unit
 ) {
     ElevatedCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
@@ -463,6 +485,11 @@ private fun OutputCard(
                 CardButton(
                     onClick = onRadioControlClick,
                     text = stringResource(id = R.string.prefs_cat_output),
+                    modifier = Modifier.weight(1f)
+                )
+                CardButton(
+                    onClick = onSerialClick,
+                    text = "串口",
                     modifier = Modifier.weight(1f)
                 )
             }

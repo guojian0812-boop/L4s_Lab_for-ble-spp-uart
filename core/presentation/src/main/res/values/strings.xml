@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Commmon -->
-    <string name="app_name" translatable="false">Look4Sat</string>
+    <string name="app_name" translatable="false">L4S-Labs</string>
     <string name="btn_accept">Accept</string>
     <string name="btn_cancel">Cancel</string>
     <string name="empty_list_message">No data to show</string>
@@ -176,7 +176,7 @@
     <string name="map_visible">Visible</string>
 
     <!-- Settings screen -->
-    <string name="prefs_app_title" translatable="false">Look4Sat v%s</string>
+    <string name="prefs_app_title" translatable="false">L4S-Labs v%s</string>
     <string name="prefs_app_url" translatable="false">https://play.google.com/store/apps/details?id=com.rtbishop.look4sat</string>
     <string name="prefs_donate_title">Donate</string>
     <string name="prefs_donate_url" translatable="false">https://ko-fi.com/rt_bishop</string>
@@ -257,10 +257,10 @@
 
     <string name="prefs_bt_title">Bluetooth output</string>
     <string name="prefs_bt_rotator_switch">Enable rotation output</string>
-    <string name="prefs_bt_rotator_device_hint">Device ID</string>
+    <string name="prefs_bt_rotator_device_hint">Bluetooth MAC or paired device name (BLE/SPP)</string>
     <string name="prefs_bt_rotator_output_hint">Format</string>
     <string name="prefs_bt_frequency_switch">Enable frequency output</string>
-    <string name="prefs_bt_frequency_device_hint">Device ID</string>
+    <string name="prefs_bt_frequency_device_hint">Bluetooth MAC or paired device name (BLE/SPP)</string>
     <string name="prefs_bt_frequency_output_hint">Format</string>
     <string name="prefs_bt_perm_error">Check your bluetooth permission</string>
     <string name="prefs_net_perm_error">Check your network permission</string>
@@ -296,4 +296,16 @@
     <!-- Main screen -->
     <string name="tracking_format">Tracking: %s</string>
 
+    <string name="prefs_bt_connect">Connect</string>
+    <string name="prefs_bt_connecting">Connecting…</string>
+    <string name="prefs_bt_connected">Connected</string>
+    <string name="prefs_bt_connect_failed">Connection failed</string>
+    <string name="prefs_bt_scan">Search</string>
+    <string name="prefs_bt_scanning">Searching…</string>
+    <string name="prefs_bt_scan_failed">Bluetooth search failed</string>
+    <string name="prefs_bt_no_devices">No Bluetooth devices found</string>
+    <string name="prefs_bt_permission_denied">Bluetooth permission denied</string>
+    <string name="prefs_bt_disconnect">Disconnect</string>
+    <string name="prefs_bt_disconnecting">Disconnecting…</string>
+    <string name="prefs_bt_disconnected">Disconnected</string>
 </resources>

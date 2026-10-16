@@ -117,6 +117,8 @@ class SstvDecoder(
     fun clearPixels() {
         imageBuffer.line = -1
         imageBuffer.pixels.fill(0)
+        scopeBuffer.pixels.fill(0)
+        scopeBuffer.line = 0
         decoder.resetQuality()
         if (enableDiagnosticsHandle) _qualityMetrics.value = null
     }
@@ -157,9 +159,15 @@ class SstvDecoder(
         // the entire array and send padding pixels to the observer.
         val imagePixels = if (imageBuffer.line > 0) imageBuffer.pixels.copyOf(imageWidth * imageHeight) else null
         val modeName = decoder.currentMode.name
-        val scopePixels = if (includeScopeData) scopeBuffer.pixels.copyOf() else null
+        // Export the active rolling viewport (half of the double-height buffer).
+        // Starting at the cursor keeps the latest decoded line at the bottom while
+        // the cursor wraps, matching Robot36's scrolling scope preview.
         val scopeWidth = if (includeScopeData) scopeBuffer.width else 0
-        val scopeHeight = if (includeScopeData) scopeBuffer.height else 0
+        val scopeHeight = if (includeScopeData) scopeBuffer.height / 2 else 0
+        val scopePixels = if (includeScopeData) {
+            val start = scopeBuffer.line * scopeBuffer.width
+            scopeBuffer.pixels.copyOfRange(start, start + scopeWidth * scopeHeight)
+        } else null
         _frames.tryEmit(
             SstvFrame(
                 scopePixels = scopePixels,

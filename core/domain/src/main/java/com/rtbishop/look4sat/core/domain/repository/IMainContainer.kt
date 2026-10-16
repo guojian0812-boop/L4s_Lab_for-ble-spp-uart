@@ -34,7 +34,15 @@ interface IMainContainer {
     fun provideAddToCalendar(): IAddToCalendar
     fun provideShowToast(): IShowToast
     fun provideBluetoothReporter(): IReporter
+    suspend fun connectBluetoothDevice(deviceId: String): Boolean = false
+    suspend fun disconnectBluetoothDevice(deviceId: String): Boolean = false
+    suspend fun scanBluetoothDevices(): List<Pair<String, String>> = emptyList()
+    suspend fun isBluetoothDeviceConnected(deviceId: String): Boolean = false
+    suspend fun sendBluetoothRaw(deviceId: String, bytes: ByteArray): Boolean = false
+    fun observeBluetoothReceivedBytes(deviceId: String): kotlinx.coroutines.flow.Flow<ByteArray> =
+        kotlinx.coroutines.flow.emptyFlow()
     fun provideNetworkReporter(): IReporter
+    fun provideSerialOutput(): ISerialOutput
     fun provideSensorsRepo(): ISensorsRepo
     fun provideTxRadioController(): IRadioController
     fun provideRxRadioController(): IRadioController
