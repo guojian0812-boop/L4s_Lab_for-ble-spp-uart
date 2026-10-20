@@ -42,6 +42,9 @@ import kotlinx.coroutines.flow.update
 import org.json.JSONObject
 import java.util.Locale
 
+private const val DEFAULT_DTRAC_ASCII_FREQUENCY_FORMAT =
+    "F \$FREQ\nM \$MODE\nT \$FREQ_T\nTC \$CTCSS_T\nRC \$CTCSS_R"
+
 class SettingsRepo(
     private val locationManager: LocationManager,
     private val preferences: SharedPreferences,
@@ -285,7 +288,10 @@ class SettingsRepo(
         preferences.edit {
             for (key in formatKeys) {
                 val value = preferences.getString(key, null) ?: continue
-                if (value.contains("_") && !value.startsWith("\\")) {
+                val marker = value.trim().removePrefix("\\")
+                if (marker == "__L4S_DTRAC_ASCII_V1__" || marker == "__L4S_DTRAC_BINARY_V1__") {
+                    putString(key, "__L4S_DTRAC_BINARY_V1__")
+                } else if (value.contains("_") && !value.startsWith("\\")) {
                     putString(key, "\\$value")
                 }
             }
@@ -339,7 +345,11 @@ class SettingsRepo(
         bluetoothRotatorAddress = preferences.getString(keyBluetoothRotatorAddress, null) ?: "00:0C:BF:13:80:5D",
         bluetoothFrequencyState = preferences.getBoolean(keyBluetoothFrequencyState, false),
         bluetoothFrequencyAddress = preferences.getString(keyBluetoothFrequencyAddress, null) ?: "00:0C:BF:13:80:5D",
-        bluetoothFrequencyFormat = preferences.getString(keyBluetoothFrequencyFormat, null) ?: $$"F $FREQ"
+        bluetoothFrequencyFormat = when (val savedFormat = preferences.getString(keyBluetoothFrequencyFormat, null)) {
+            null, "F \$FREQ", "F \$FREQ\\r\\n", "F \$FREQ\r\n", "F \$FREQ\n" ->
+                DEFAULT_DTRAC_ASCII_FREQUENCY_FORMAT
+            else -> savedFormat
+        }
     )
     //endregion
 

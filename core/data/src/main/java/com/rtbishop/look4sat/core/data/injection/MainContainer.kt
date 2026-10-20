@@ -198,7 +198,7 @@ class MainContainer(private val context: Context) : IMainContainer {
     }
 
     private fun provideRemoteSource(): IRemoteSource {
-        val version = context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "4.0.4"
+        val version = context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "6.2.1"
         val userAgent = "Look4Sat/$version (+https://github.com/rt-bishop/Look4Sat)"
         // Data providers ask clients to identify themselves, so that they can reach out to the
         // developer instead of silently blocking every user of the app behind a misbehaving request
@@ -221,7 +221,7 @@ class MainContainer(private val context: Context) : IMainContainer {
         val appPrefsFileName = "${context.packageName}_preferences"
         val appPreferences = context.getSharedPreferences(appPrefsFileName, Context.MODE_PRIVATE)
         val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-        val appVersionName = packageInfo.versionName ?: "4.0.4"
+        val appVersionName = packageInfo.versionName ?: "6.2.1"
         val appVersionCode = PackageInfoCompat.getLongVersionCode(packageInfo)
         return SettingsRepo(manager, appPreferences, appVersionName, appVersionCode)
     }

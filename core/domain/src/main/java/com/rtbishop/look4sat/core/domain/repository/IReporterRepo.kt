@@ -20,4 +20,21 @@ package com.rtbishop.look4sat.core.domain.repository
 interface IReporter {
     fun reportRotation(format: String, azimuth: Double, elevation: Double)
     fun reportFrequency(format: String, frequency: Long)
+
+    /**
+     * Report the currently selected transponder's RX/TX frequency and radio settings.
+     * Ordinary reporters keep their existing frequency-only behavior; DTrac-capable
+     * reporters override this to emit the complete F/M/T/C ASCII command group.
+     */
+    fun reportTransceiverData(
+        format: String,
+        rxFrequencyHz: Long,
+        txFrequencyHz: Long?,
+        txMode: String?,
+        rxMode: String?,
+        txCtcssToneHz: Double?,
+        rxCtcssToneHz: Double?
+    ) {
+        reportFrequency(format, rxFrequencyHz)
+    }
 }

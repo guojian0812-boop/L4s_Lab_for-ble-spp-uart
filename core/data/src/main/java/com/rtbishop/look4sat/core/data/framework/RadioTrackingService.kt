@@ -133,12 +133,25 @@ class RadioTrackingService(
     // ── Tracking ────────────────────────────────────────────────────────────
 
     override fun startTracking(pass: OrbitalPass, transponder: SatRadio, txBaseFreqHz: Long?) {
+        val previousState = _state.value
+        val txBase = txBaseFreqHz ?: previousState.txBaseFrequencyHz
+        // Keep a manually edited RX base when tracking starts on the same transponder.
+        // A newly selected transponder has already had its RX base initialized by setTransponder().
+        val rxBase = if (previousState.selectedTransponder?.uuid == transponder.uuid) {
+            previousState.rxBaseFrequencyHz
+                ?: txBase?.let { TransponderMapper.mapUplinkToDownlink(it, transponder) }
+                ?: transponder.downlinkLow
+        } else {
+            txBase?.let { TransponderMapper.mapUplinkToDownlink(it, transponder) }
+                ?: transponder.downlinkLow
+        }
         _state.update {
             it.copy(
                 isActive             = true,
                 currentPass          = pass,
                 selectedTransponder  = transponder,
-                txBaseFrequencyHz    = txBaseFreqHz
+                txBaseFrequencyHz    = txBase,
+                rxBaseFrequencyHz    = rxBase
             )
         }
         trackingJob?.cancel()
@@ -148,9 +161,9 @@ class RadioTrackingService(
         val isSplit    = isIcom && rcSettings.splitMode
 
         if (isSplit) {
-            trackingJob = appScope.launch { runSplitTracking(transponder, txBaseFreqHz) }
+            trackingJob = appScope.launch { runSplitTracking(transponder, txBase) }
         } else {
-            trackingJob = appScope.launch { runDualRadioTracking(transponder, txBaseFreqHz) }
+            trackingJob = appScope.launch { runDualRadioTracking(transponder, txBase) }
         }
     }
 
@@ -161,8 +174,9 @@ class RadioTrackingService(
         val rx = rxController
 
         // Initial setup: set band/mode/CTCSS on both radios
-        val txMode = transponder.uplinkMode
-        val rxMode = transponder.downlinkMode
+        val configuredModes = _state.value
+        val txMode = configuredModes.txMode ?: transponder.uplinkMode
+        val rxMode = configuredModes.rxMode ?: transponder.downlinkMode
             ?: transponder.uplinkMode?.let {
                 TransponderMapper.mapUplinkModeToDownlinkMode(it, transponder.isInverted)
             }
@@ -171,11 +185,11 @@ class RadioTrackingService(
 
         if (tx != null && tx.isConnected && txMode != null) {
             Log.d(tag, "Setting TX mode: $txMode")
-            tx.setMode(txMode)
+            tx.setMode(toControllerMode(txMode))
         }
         if (rx != null && rx.isConnected && rxMode != null) {
             Log.d(tag, "Setting RX mode: $rxMode")
-            rx.setMode(rxMode)
+            rx.setMode(toControllerMode(rxMode))
         }
         if (txMode?.uppercase() == "FM") {
             _state.value.ctcssTone?.let { tone ->
@@ -218,7 +232,13 @@ class RadioTrackingService(
                                 val newBase = (freq.toDouble() * SPEED_OF_LIGHT / (SPEED_OF_LIGHT + v)).toLong()
                                 if (newBase > 0) {
                                     txBaseFreq = newBase
-                                    _state.update { it.copy(txBaseFrequencyHz = newBase) }
+                                    val mappedRxBase = TransponderMapper.mapUplinkToDownlink(newBase, xpdr)
+                                    _state.update {
+                                        it.copy(
+                                            txBaseFrequencyHz = newBase,
+                                            rxBaseFrequencyHz = mappedRxBase ?: it.rxBaseFrequencyHz
+                                        )
+                                    }
                                     Log.i(tag, "TX tuning done → base=$newBase")
                                 }
                             } else if (tuningRadio == "rx") {
@@ -226,7 +246,9 @@ class RadioTrackingService(
                                 val newTxBase = TransponderMapper.mapDownlinkToUplink(rxNominal, xpdr)
                                 if (newTxBase != null && newTxBase > 0) {
                                     txBaseFreq = newTxBase
-                                    _state.update { it.copy(txBaseFrequencyHz = newTxBase) }
+                                    _state.update {
+                                        it.copy(txBaseFrequencyHz = newTxBase, rxBaseFrequencyHz = rxNominal)
+                                    }
                                     Log.i(tag, "RX tuning done → txBase=$newTxBase")
                                 }
                             }
@@ -260,7 +282,7 @@ class RadioTrackingService(
             }
 
             val txRadioFreq = txBaseFreq?.let { pos.getUplinkFreq(it) }
-            val rxBaseFreq  = if (txBaseFreq != null) {
+            val rxBaseFreq  = _state.value.rxBaseFrequencyHz ?: if (txBaseFreq != null) {
                 TransponderMapper.mapUplinkToDownlink(txBaseFreq, xpdr)
             } else xpdr.downlinkLow
             val rxRadioFreq = rxBaseFreq?.let { pos.getDownlinkFreq(it) }
@@ -297,8 +319,9 @@ class RadioTrackingService(
         val radio = txController ?: return
         if (!radio.isConnected) return
 
-        val txMode = transponder.uplinkMode
-        val rxMode = transponder.downlinkMode
+        val configuredModes = _state.value
+        val txMode = configuredModes.txMode ?: transponder.uplinkMode
+        val rxMode = configuredModes.rxMode ?: transponder.downlinkMode
             ?: transponder.uplinkMode?.let {
                 TransponderMapper.mapUplinkModeToDownlinkMode(it, transponder.isInverted)
             }
@@ -310,7 +333,7 @@ class RadioTrackingService(
             transponder.uplinkLow != null -> transponder.uplinkLow!!
             else -> null
         }
-        val rxNominal = if (txCenter != null) {
+        val rxNominal = _state.value.rxBaseFrequencyHz ?: if (txCenter != null) {
             TransponderMapper.mapUplinkToDownlink(txCenter, transponder)
         } else transponder.downlinkLow
 
@@ -332,7 +355,7 @@ class RadioTrackingService(
         }
         if (rxMode != null) {
             Log.d(tag, "Split init: VFO-A mode=$rxMode")
-            radio.setMode(rxMode)
+            radio.setMode(toControllerMode(rxMode))
         }
 
         // VFO-B = TX (uplink)
@@ -346,7 +369,7 @@ class RadioTrackingService(
         }
         if (txMode != null) {
             Log.d(tag, "Split init: VFO-B mode=$txMode")
-            radio.setMode(txMode)
+            radio.setMode(toControllerMode(txMode))
         }
         if (txMode?.uppercase() == "FM") {
             val tone = _state.value.ctcssTone
@@ -398,7 +421,13 @@ class RadioTrackingService(
                             val newBase = (readFreq.toDouble() * SPEED_OF_LIGHT / (SPEED_OF_LIGHT + v)).toLong()
                             if (newBase > 0) {
                                 txBaseFreq = newBase
-                                _state.update { it.copy(txBaseFrequencyHz = newBase) }
+                                val mappedRxBase = TransponderMapper.mapUplinkToDownlink(newBase, xpdr)
+                                _state.update {
+                                    it.copy(
+                                        txBaseFrequencyHz = newBase,
+                                        rxBaseFrequencyHz = mappedRxBase ?: it.rxBaseFrequencyHz
+                                    )
+                                }
                                 Log.i(tag, "Split TX tuning done → base=$newBase")
                             }
                         } else if (tuningRadio == "rx") {
@@ -406,7 +435,9 @@ class RadioTrackingService(
                             val newTxBase = TransponderMapper.mapDownlinkToUplink(rxNominal, xpdr)
                             if (newTxBase != null && newTxBase > 0) {
                                 txBaseFreq = newTxBase
-                                _state.update { it.copy(txBaseFrequencyHz = newTxBase) }
+                                _state.update {
+                                    it.copy(txBaseFrequencyHz = newTxBase, rxBaseFrequencyHz = rxNominal)
+                                }
                                 Log.i(tag, "Split RX tuning done → txBase=$newTxBase")
                             }
                         }
@@ -440,7 +471,7 @@ class RadioTrackingService(
 
             // Determine Doppler-corrected frequencies
             val txRadioFreq = txBaseFreq?.let { pos.getUplinkFreq(it) }
-            val rxBaseCalc  = if (txBaseFreq != null) {
+            val rxBaseCalc  = _state.value.rxBaseFrequencyHz ?: if (txBaseFreq != null) {
                 TransponderMapper.mapUplinkToDownlink(txBaseFreq, xpdr)
             } else xpdr.downlinkLow
             val rxRadioFreq = rxBaseCalc?.let { pos.getDownlinkFreq(it) }
@@ -487,12 +518,12 @@ class RadioTrackingService(
         appScope.launch {
             val tx = txController
             val rx = rxController
-            transponder.uplinkMode?.let { tx?.setMode(it) }
+            transponder.uplinkMode?.let { tx?.setMode(toControllerMode(it)) }
             val rxMode = transponder.downlinkMode
                 ?: transponder.uplinkMode?.let {
                     TransponderMapper.mapUplinkModeToDownlinkMode(it, transponder.isInverted)
                 }
-            rxMode?.let { rx?.setMode(it) }
+            rxMode?.let { rx?.setMode(toControllerMode(it)) }
             if (transponder.uplinkMode?.uppercase() == "FM") {
                 _state.value.ctcssTone?.let { tone ->
                     tx?.setCtcssTone(tone)
@@ -513,6 +544,7 @@ class RadioTrackingService(
             it.copy(
                 selectedTransponder = transponder,
                 txBaseFrequencyHz   = txCenter,
+                rxBaseFrequencyHz   = rxNominal,
                 txFrequencyHz       = txCenter,
                 rxFrequencyHz       = rxNominal,
                 txMode              = transponder.uplinkMode,
@@ -525,12 +557,34 @@ class RadioTrackingService(
     }
 
     override fun setTxBaseFrequency(frequencyHz: Long) {
-        _state.update { it.copy(txBaseFrequencyHz = frequencyHz) }
+        val current = _state.value
+        val mappedRxBase = current.selectedTransponder?.let {
+            TransponderMapper.mapUplinkToDownlink(frequencyHz, it)
+        } ?: current.rxBaseFrequencyHz
+        _state.update {
+            it.copy(
+                txBaseFrequencyHz = frequencyHz,
+                rxBaseFrequencyHz = mappedRxBase,
+                txFrequencyHz = if (it.isActive) it.txFrequencyHz else frequencyHz,
+                rxFrequencyHz = if (it.isActive) it.rxFrequencyHz else mappedRxBase
+            )
+        }
     }
 
     override fun adjustTxBaseFrequency(deltaHz: Long) {
         val current = _state.value.txBaseFrequencyHz ?: return
-        _state.update { it.copy(txBaseFrequencyHz = current + deltaHz) }
+        setTxBaseFrequency(current + deltaHz)
+    }
+
+    override fun setBaseFrequencies(txFrequencyHz: Long, rxFrequencyHz: Long) {
+        _state.update {
+            it.copy(
+                txBaseFrequencyHz = txFrequencyHz,
+                rxBaseFrequencyHz = rxFrequencyHz,
+                txFrequencyHz = if (it.isActive) it.txFrequencyHz else txFrequencyHz,
+                rxFrequencyHz = if (it.isActive) it.rxFrequencyHz else rxFrequencyHz
+            )
+        }
     }
 
     override fun setCtcssTone(toneHz: Double?) {
@@ -546,11 +600,41 @@ class RadioTrackingService(
         }
     }
 
+    /** Store RX tone separately for the DTrac RC command. This is not the TX CAT encoder tone. */
+    override fun setRxCtcssTone(toneHz: Double?) {
+        _state.update { it.copy(rxCtcssTone = toneHz) }
+    }
+
     override fun setMode(txMode: String, rxMode: String) {
         appScope.launch {
-            txController?.setMode(txMode)
-            rxController?.setMode(rxMode)
+            val rcSettings = settingsRepo.radioControlSettings.value
+            val isIcomSplit = rcSettings.radioModel == RadioControlSettings.MODEL_ICOM_IC705 && rcSettings.splitMode
+            if (isIcomSplit) {
+                // In IC-705 split mode both directions share one controller but use
+                // separate VFOs: A is RX, B is TX.
+                txController?.let { radio ->
+                    radio.setVfo(vfoA = true)
+                    radio.setMode(toControllerMode(rxMode))
+                    radio.setVfo(vfoA = false)
+                    radio.setMode(toControllerMode(txMode))
+                    radio.setVfo(vfoA = true)
+                }
+            } else {
+                txController?.setMode(toControllerMode(txMode))
+                rxController?.setMode(toControllerMode(rxMode))
+            }
+            val tone = _state.value.ctcssTone
+            if (txMode.equals("FM", ignoreCase = true) && tone != null) {
+                txController?.setCtcssTone(tone)
+                txController?.setCtcssMode(true)
+            } else {
+                txController?.setCtcssMode(false)
+            }
         }
         _state.update { it.copy(txMode = txMode, rxMode = rxMode) }
     }
 }
+
+/** Map UI/protocol-only receive labels to modes understood by physical CAT radios. */
+private fun toControllerMode(mode: String): String =
+    if (mode.equals("SSTV(BY)", ignoreCase = true)) "FM" else mode

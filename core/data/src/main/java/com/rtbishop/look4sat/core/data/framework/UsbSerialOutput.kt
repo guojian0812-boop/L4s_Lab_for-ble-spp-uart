@@ -316,25 +316,72 @@ class UsbSerialOutput(
 
     override fun reportFrequency(format: String, frequency: Long) {
         val active = _settings.value.frequencyState && _connectionState.value.isConnected
-        val useDtrac = DtracFrequencyProtocol.isDtracFrequencyTemplate(format)
-        val asciiPayload = if (useDtrac) null else format
-            .replace("\$FREQ", frequency.toString())
-            .unescapeControlChars()
-            .toByteArray(Charsets.UTF_8)
-
+        val payload = if (DtracFrequencyProtocol.isDtracFrequencyTemplate(format)) {
+            DtracFrequencyProtocol.encodeFrequencyCommand(frequency)
+        } else {
+            format.replace("\$FREQ", frequency.toString())
+                .unescapeControlChars()
+                .toByteArray(Charsets.UTF_8)
+        }
         reporterScope.launch(Dispatchers.IO) {
             try {
-                DtracFrequencyProtocol.sendFrequencyOutput(
+                DtracFrequencyProtocol.sendPayload(
                     owner = this@UsbSerialOutput,
                     active = active,
-                    useDtrac = useDtrac,
-                    frequencyHz = frequency,
-                    asciiPayload = asciiPayload
-                ) { payload -> sendRaw(payload) }
+                    payload = payload
+                ) { bytes -> sendRaw(bytes); Unit }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Frequency send error: ${e.message}")
+            }
+        }
+    }
+
+    override fun reportTransceiverData(
+        format: String,
+        rxFrequencyHz: Long,
+        txFrequencyHz: Long?,
+        txMode: String?,
+        rxMode: String?,
+        txCtcssToneHz: Double?,
+        rxCtcssToneHz: Double?
+    ) {
+        val active = _settings.value.frequencyState && _connectionState.value.isConnected
+        val isDtrac = DtracFrequencyProtocol.isDtracFrequencyTemplate(format)
+        val payloads = if (isDtrac) {
+            DtracFrequencyProtocol.encodeTransceiverCommands(
+                rxFrequencyHz = rxFrequencyHz,
+                txFrequencyHz = txFrequencyHz,
+                txMode = txMode,
+                rxMode = rxMode,
+                txCtcssToneHz = txCtcssToneHz,
+                rxCtcssToneHz = rxCtcssToneHz
+            )
+        } else {
+            listOf(
+                DtracFrequencyProtocol.formatAsciiTemplate(
+                    template = format,
+                    rxFrequencyHz = rxFrequencyHz,
+                    txFrequencyHz = txFrequencyHz,
+                    txMode = txMode,
+                    rxMode = rxMode,
+                    txCtcssToneHz = txCtcssToneHz,
+                    rxCtcssToneHz = rxCtcssToneHz
+                ).toByteArray(Charsets.UTF_8)
+            )
+        }
+        reporterScope.launch(Dispatchers.IO) {
+            try {
+                DtracFrequencyProtocol.sendFrames(
+                    owner = this@UsbSerialOutput,
+                    active = active,
+                    frames = payloads
+                ) { bytes -> sendRaw(bytes); Unit }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "DTrac command send error: ${e.message}")
             }
         }
     }
@@ -356,7 +403,7 @@ class UsbSerialOutput(
         }
         val frequencyFormat = when (storedFrequencyFormat) {
             null -> defaults.frequencyFormat
-            "F \$FREQ\\r\\n" -> defaults.frequencyFormat
+            "F \$FREQ", "F \$FREQ\\r\\n", "F \$FREQ\r\n", "F \$FREQ\n" -> defaults.frequencyFormat
             else -> storedFrequencyFormat
         }
         return SerialOutputSettings(

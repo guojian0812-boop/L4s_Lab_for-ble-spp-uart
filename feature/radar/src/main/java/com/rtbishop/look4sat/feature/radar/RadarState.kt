@@ -37,7 +37,11 @@ data class RadioControlSubState(
     val rxPanel: RadioPanelState = RadioPanelState("RX (Downlink)"),
     val selectedTransponderUuid: String? = null,
     val txBaseFrequencyHz: Long? = null,
+    val rxBaseFrequencyHz: Long? = null,
+    /** TX CTCSS tone. */
     val ctcssTone: Double? = null,
+    /** RX CTCSS tone for the DTrac receiver path. */
+    val rxCtcssTone: Double? = null,
     val isTracking: Boolean = false,
     val errorMessage: String? = null
 )
@@ -86,7 +90,10 @@ sealed interface RadarAction {
     // Radio control actions
     data class SetTxFrequency(val frequencyHz: Long) : RadarAction
     data class AdjustTxFrequency(val deltaHz: Long) : RadarAction
+    data class SetBaseFrequencies(val txFrequencyHz: Long, val rxFrequencyHz: Long) : RadarAction
+    data class SetRadioModes(val txMode: String, val rxMode: String) : RadarAction
     data class SetCtcssTone(val toneHz: Double?) : RadarAction
+    data class SetRxCtcssTone(val toneHz: Double?) : RadarAction
     data object ToggleTracking : RadarAction
     data object ConnectRadios : RadarAction
     data object DisconnectRadios : RadarAction

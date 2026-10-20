@@ -231,6 +231,7 @@ private fun PagerCard(
                         transceivers = uiState.transceivers.transmitters,
                         selectedUuid = uiState.transceivers.selectedUuid,
                         radioControl = uiState.radioControl,
+                        orbitalPos = uiState.orbitalPos,
                         onAction = onAction
                     )
                     RadarPage.Calculator -> CalculatorPage(
@@ -242,7 +243,23 @@ private fun PagerCard(
                     )
                     RadarPage.Sstv -> SstvPage(
                         sstv = uiState.sstv,
-                        dopplerFrequency = uiState.transceivers.selectedFrequency?.let { formatFrequency(it) },
+                        // L4S_SSTV_RX_DOPPLER_FREQUENCY_DISPLAY_FIX_V2
+                        dopplerFrequency = (
+                            (if (uiState.radioControl.isTracking) {
+                                // While tracking, use the RX frequency calculated by RadioTrackingService.
+                                uiState.radioControl.rxPanel.frequencyHz
+                                    ?: uiState.radioControl.rxBaseFrequencyHz?.let { base ->
+                                        uiState.orbitalPos?.getDownlinkFreq(base) ?: base
+                                    }
+                            } else {
+                                // While not tracking, calculate the Doppler shift from the edited RX base.
+                                uiState.radioControl.rxBaseFrequencyHz?.let { base ->
+                                    uiState.orbitalPos?.getDownlinkFreq(base) ?: base
+                                }
+                            })
+                                ?: uiState.radioControl.rxPanel.frequencyHz
+                                ?: uiState.transceivers.selectedFrequency
+                            )?.let { formatFrequency(it) },
                         onAction = onAction,
                         requestMicPermission = requestMicPermission,
                         requestSaveImage = requestSaveImage

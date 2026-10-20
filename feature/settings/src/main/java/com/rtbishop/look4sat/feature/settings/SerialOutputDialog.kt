@@ -48,6 +48,10 @@ import kotlinx.coroutines.launch
 import java.util.Locale
 
 private const val DTRAC_PROTOCOL_MARKER = "__L4S_DTRAC_BINARY_V1__"
+private const val LEGACY_DTRAC_PROTOCOL_MARKER = "__L4S_DTRAC_ASCII_V1__"
+private const val DTRAC_ASCII_FORMAT_PREVIEW = "F \$FREQ\nM \$MODE\nT \$FREQ_T\nTC \$CTCSS_T\nRC \$CTCSS_R"
+private fun isDtracMarker(value: String): Boolean =
+    value.trim().removePrefix("\\") in setOf(DTRAC_PROTOCOL_MARKER, LEGACY_DTRAC_PROTOCOL_MARKER)
 
 @Composable
 fun SerialOutputDialog(serialOutput: ISerialOutput, onDismiss: () -> Unit) {
@@ -55,10 +59,15 @@ fun SerialOutputDialog(serialOutput: ISerialOutput, onDismiss: () -> Unit) {
     val connection by serialOutput.connectionState.collectAsState()
     var draft by remember { mutableStateOf(savedSettings) }
     var useDtracProtocol by remember(savedSettings.frequencyFormat) {
-        mutableStateOf(savedSettings.frequencyFormat == DTRAC_PROTOCOL_MARKER)
+        mutableStateOf(isDtracMarker(savedSettings.frequencyFormat))
     }
     var frequencyFormatText by remember(savedSettings.frequencyFormat) {
-        mutableStateOf(if (savedSettings.frequencyFormat == DTRAC_PROTOCOL_MARKER) "F \$FREQ" else savedSettings.frequencyFormat)
+        mutableStateOf(
+            if (isDtracMarker(savedSettings.frequencyFormat) ||
+                savedSettings.frequencyFormat.trim() == "F \$FREQ M \$MODE T \$FREQ_T TC \$CTCSS_T RC \$CTCSS_R" ||
+                savedSettings.frequencyFormat.isBlank()
+            ) DTRAC_ASCII_FORMAT_PREVIEW else savedSettings.frequencyFormat
+        )
     }
     fun settingsForSave(): SerialOutputSettings = draft.copy(
         frequencyFormat = if (useDtracProtocol) DTRAC_PROTOCOL_MARKER else frequencyFormatText
@@ -149,21 +158,15 @@ fun SerialOutputDialog(serialOutput: ISerialOutput, onDismiss: () -> Unit) {
                         checked = useDtracProtocol,
                         onCheckedChange = { useDtracProtocol = it }
                     )
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("使用 DTrac 二进制协议")
-                        Text(
-                            "CMD_6666/BYP + CMD_8888 频率",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    Text("D")
                 }
                 OutlinedTextField(
                     value = frequencyFormatText,
                     onValueChange = { frequencyFormatText = it },
                     enabled = !useDtracProtocol,
-                    label = { Text("频率格式（未选 DTrac 时使用）") },
-                    singleLine = true,
+                    label = { Text("频率格式") },
+                    minLines = 5,
+                    maxLines = 5,
                     modifier = Modifier.fillMaxWidth()
                 )
                 Text("连接状态：${connection.message}", color = if (connection.isConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)

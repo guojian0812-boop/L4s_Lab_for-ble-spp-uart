@@ -274,7 +274,9 @@ class RadarViewModel(
                                 mode = svc.rxMode
                             ),
                             txBaseFrequencyHz = svc.txBaseFrequencyHz,
+                            rxBaseFrequencyHz = svc.rxBaseFrequencyHz,
                             ctcssTone = svc.ctcssTone,
+                            rxCtcssTone = svc.rxCtcssTone,
                             isTracking = svc.isActive,
                             selectedTransponderUuid = svc.selectedTransponder?.uuid,
                             errorMessage = svc.errorMessage
@@ -299,15 +301,18 @@ class RadarViewModel(
                 _uiState.update {
                     it.copy(transceivers = it.transceivers.copy(selectedUuid = newUuid))
                 }
-                // Only update the tracking service when selecting a different transponder to
-                // avoid resetting a user-adjusted TX base on re-expand
-                if (!isTogglingOff) {
+                // Keep the tracking-service overrides when the same row is collapsed and
+                // reopened. Initialize defaults only when the actual transponder changes.
+                if (!isTogglingOff && trackingService.state.value.selectedTransponder?.uuid != action.uuid) {
                     transponders.find { it.uuid == action.uuid }?.let { trackingService.setTransponder(it) }
                 }
             }
             is RadarAction.SetTxFrequency -> trackingService.setTxBaseFrequency(action.frequencyHz)
             is RadarAction.AdjustTxFrequency -> trackingService.adjustTxBaseFrequency(action.deltaHz)
+            is RadarAction.SetBaseFrequencies -> trackingService.setBaseFrequencies(action.txFrequencyHz, action.rxFrequencyHz)
+            is RadarAction.SetRadioModes -> trackingService.setMode(action.txMode, action.rxMode)
             is RadarAction.SetCtcssTone -> trackingService.setCtcssTone(action.toneHz)
+            is RadarAction.SetRxCtcssTone -> trackingService.setRxCtcssTone(action.toneHz)
             RadarAction.ToggleTracking -> {
                 val svc = trackingService.state.value
                 if (svc.isActive) {
@@ -425,8 +430,35 @@ class RadarViewModel(
             reporter.reportRotation(rotatorFormat, azimuth, elevation)
         }
         if (frequencyEnabled) {
-            _uiState.value.transceivers.selectedFrequency?.let { freq ->
-                reporter.reportFrequency(frequencyFormat, freq)
+            val state = _uiState.value
+            // Only stream settings for a transponder explicitly selected in Transceivers.
+            // The editable nominal values come from RadioTrackingService; apply the
+            // current orbital Doppler shift here so BLE/SPP/USB follow the same rates
+            // even when the CAT-radio tracking controls are not active.
+            if (state.transceivers.selectedUuid != null) {
+                val radioControl = state.radioControl
+                val rxFrequency = radioControl.rxBaseFrequencyHz
+                    ?.takeIf { it > 0L }
+                    ?.let { orbitalPos.getDownlinkFreq(it) }
+                    ?: state.transceivers.selectedFrequency
+                if (rxFrequency != null && rxFrequency > 0L) {
+                    val txFrequency = radioControl.txBaseFrequencyHz
+                        ?.takeIf { it > 0L }
+                        ?.let { orbitalPos.getUplinkFreq(it) }
+                    val selectedTransponder = state.transceivers.transmitters
+                        .firstOrNull { it.uuid == state.transceivers.selectedUuid }
+                    val txMode = radioControl.txPanel.mode ?: selectedTransponder?.uplinkMode ?: "FM"
+                    val rxMode = radioControl.rxPanel.mode ?: selectedTransponder?.downlinkMode ?: "FM"
+                    reporter.reportTransceiverData(
+                        format = frequencyFormat,
+                        rxFrequencyHz = rxFrequency,
+                        txFrequencyHz = txFrequency,
+                        txMode = txMode,
+                        rxMode = rxMode,
+                        txCtcssToneHz = radioControl.ctcssTone,
+                        rxCtcssToneHz = radioControl.rxCtcssTone
+                    )
+                }
             }
         }
     }

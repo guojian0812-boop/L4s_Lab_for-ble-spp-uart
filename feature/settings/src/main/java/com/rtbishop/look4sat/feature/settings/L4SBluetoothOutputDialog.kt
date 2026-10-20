@@ -64,11 +64,20 @@ private enum class BluetoothConnectState {
 
 private enum class BluetoothAction { CONNECT, DISCONNECT }
 
+private const val FD_DTRAC_MARKER = "__L4S_DTRAC_BINARY_V1__"
+private const val FD_DTRAC_ASCII_LEGACY_MARKER = "__L4S_DTRAC_ASCII_V1__"
+private const val FD_DTRAC_FORMAT_PREVIEW = "F \$FREQ\nM \$MODE\nT \$FREQ_T\nTC \$CTCSS_T\nRC \$CTCSS_R"
+private fun isFdDtracMarker(value: String): Boolean =
+    value.trim().removePrefix("\\") in setOf(FD_DTRAC_MARKER, FD_DTRAC_ASCII_LEGACY_MARKER)
+
 /**
  * L4S-Labs Bluetooth dialog. Selected device IDs remain MAC addresses in settings; the UI shows
  * the human-friendly name and MAC together. Scanning includes nearby BLE/classic devices and
  * previously paired devices, so the same selector can be used for BLE GATT or Classic SPP.
  */
+private const val DTRAC_ASCII_FORMAT_PREVIEW =
+    "F \$FREQ\nM \$MODE\nT \$FREQ_T\nTC \$CTCSS_T\nRC \$CTCSS_R"
+
 @Composable
 internal fun L4SBluetoothOutputDialog(
     initialRotatorState: Boolean,
@@ -92,10 +101,14 @@ internal fun L4SBluetoothOutputDialog(
     var frequencyEnabled by remember(initialFrequencyState) { mutableStateOf(initialFrequencyState) }
     var frequencyAddress by remember(initialFrequencyAddress) { mutableStateOf(initialFrequencyAddress) }
     var useDtracProtocol by remember(initialFrequencyFormat) {
-        mutableStateOf(initialFrequencyFormat == "__L4S_DTRAC_BINARY_V1__")
+        mutableStateOf(isFdDtracMarker(initialFrequencyFormat))
     }
     var frequencyFormat by remember(initialFrequencyFormat) {
-        mutableStateOf(if (initialFrequencyFormat == "__L4S_DTRAC_BINARY_V1__") "F \$FREQ" else initialFrequencyFormat)
+        mutableStateOf(
+            if (isFdDtracMarker(initialFrequencyFormat) ||
+                initialFrequencyFormat.trim() == "F \$FREQ M \$MODE T \$FREQ_T TC \$CTCSS_T RC \$CTCSS_R" || initialFrequencyFormat.isBlank()
+            ) FD_DTRAC_FORMAT_PREVIEW else initialFrequencyFormat
+        )
     }
 
     // The dialog is recreated when dismissed. Query the shared transport registry each time
@@ -201,23 +214,39 @@ internal fun L4SBluetoothOutputDialog(
                         checked = useDtracProtocol,
                         onCheckedChange = { useDtracProtocol = it }
                     )
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("使用 DTrac 二进制协议")
-                        Text(
-                            "CMD_6666/BYP + CMD_8888 频率",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    Text("D")
                 }
-                OutlinedTextField(
-                    value = frequencyFormat,
-                    onValueChange = { frequencyFormat = it },
-                    enabled = !useDtracProtocol,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("频率格式（未选 DTrac 时使用）") },
-                    singleLine = true
-                )
+                if (useDtracProtocol) {
+                    OutlinedTextField(
+                        value = DTRAC_ASCII_FORMAT_PREVIEW,
+                        onValueChange = {},
+                        readOnly = true,
+                        minLines = 5,
+                        maxLines = 5,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("频率格式") }
+                    )
+                    Text(
+                        " ",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    OutlinedTextField(
+                        value = frequencyFormat,
+                        onValueChange = { frequencyFormat = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !useDtracProtocol,
+                        label = { Text("频率格式") },
+                        minLines = 5,
+                        maxLines = 5
+                    )
+                    Text(
+                        " ",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 val debugDevicesConnected = rotatorConnectState == BluetoothConnectState.CONNECTED ||
                     frequencyConnectState == BluetoothConnectState.CONNECTED
                 Row(
@@ -261,7 +290,7 @@ internal fun L4SBluetoothOutputDialog(
                     rotatorFormat,
                     frequencyEnabled,
                     frequencyAddress.trim(),
-                    if (useDtracProtocol) "__L4S_DTRAC_BINARY_V1__" else frequencyFormat
+                    if (useDtracProtocol) "__L4S_DTRAC_ASCII_V1__" else frequencyFormat
                 )
                 onDismiss()
             }) {

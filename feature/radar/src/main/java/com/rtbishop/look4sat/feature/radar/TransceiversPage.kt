@@ -78,11 +78,10 @@ import com.rtbishop.look4sat.core.domain.model.SatRadio
 import com.rtbishop.look4sat.core.domain.predict.OrbitalPos
 import com.rtbishop.look4sat.core.domain.utility.DopplerFrequencyCalculator
 import com.rtbishop.look4sat.core.domain.utility.TransponderMapper
-import com.rtbishop.look4sat.core.presentation.CardButton
 import com.rtbishop.look4sat.core.presentation.R
-import com.rtbishop.look4sat.core.presentation.formatFrequency
 import com.rtbishop.look4sat.core.presentation.infiniteMarquee
 import java.util.Locale
+import kotlin.math.roundToLong
 import kotlin.time.Duration.Companion.milliseconds
 
 @Composable
@@ -90,6 +89,7 @@ fun TransceiversPage(
     transceivers: List<SatRadio>,
     selectedUuid: String?,
     radioControl: RadioControlSubState,
+    orbitalPos: OrbitalPos?,
     onAction: (RadarAction) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -114,6 +114,7 @@ fun TransceiversPage(
                     radio = radio,
                     isExpanded = isExpanded,
                     radioControl = radioControl,
+                    orbitalPos = orbitalPos,
                     onAction = onAction,
                     onToggle = { onAction(RadarAction.SelectTransmitter(radio.uuid)) }
                 )
@@ -224,6 +225,7 @@ private fun TransceiverItem(
     radio: SatRadio,
     isExpanded: Boolean,
     radioControl: RadioControlSubState,
+    orbitalPos: OrbitalPos?,
     onAction: (RadarAction) -> Unit,
     onToggle: () -> Unit
 ) {
@@ -290,17 +292,29 @@ private fun TransceiverItem(
                 }
             }
 
-            // Frequency rows
+            // Collapsed rows show the transponder band edges. The expanded row
+            // shows the editable nominal base frequency and the live Doppler-corrected value.
+            val radioStateMatches = isExpanded && radioControl.selectedTransponderUuid == radio.uuid
             UnifiedFrequencyRow(
                 label = "TX",
-                frequencyLow = radio.uplinkLow,
-                frequencyHigh = radio.uplinkHigh,
+                frequencyLow = if (radioStateMatches) radioControl.txBaseFrequencyHz ?: radio.uplinkLow else radio.uplinkLow,
+                frequencyHigh = if (radioStateMatches) {
+                    radioControl.txBaseFrequencyHz?.takeIf { it > 0L }?.let { base ->
+                        orbitalPos?.getUplinkFreq(base)
+                    } ?: radioControl.txPanel.frequencyHz ?: radio.uplinkHigh
+                } else radio.uplinkHigh,
+                showBaseAndDoppler = radioStateMatches,
                 isConnected = if (isExpanded) radioControl.txPanel.isConnected else null
             )
             UnifiedFrequencyRow(
                 label = "RX",
-                frequencyLow = radio.downlinkLow,
-                frequencyHigh = radio.downlinkHigh,
+                frequencyLow = if (radioStateMatches) radioControl.rxBaseFrequencyHz ?: radio.downlinkLow else radio.downlinkLow,
+                frequencyHigh = if (radioStateMatches) {
+                    radioControl.rxBaseFrequencyHz?.takeIf { it > 0L }?.let { base ->
+                        orbitalPos?.getDownlinkFreq(base)
+                    } ?: radioControl.rxPanel.frequencyHz ?: radio.downlinkHigh
+                } else radio.downlinkHigh,
+                showBaseAndDoppler = radioStateMatches,
                 isConnected = if (isExpanded) radioControl.rxPanel.isConnected else null
             )
         }
@@ -327,6 +341,7 @@ private fun UnifiedFrequencyRow(
     label: String,
     frequencyLow: Long?,
     frequencyHigh: Long?,
+    showBaseAndDoppler: Boolean = false,
     isConnected: Boolean?
 ) {
     Row(
@@ -340,11 +355,16 @@ private fun UnifiedFrequencyRow(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.width(24.dp)
         )
-        // Low frequency
-        FrequencyText(
-            frequency = frequencyLow,
+        // First frequency: nominal base in expanded mode, band-low when collapsed.
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.weight(1f)
-        )
+        ) {
+            if (showBaseAndDoppler) {
+                Text("基频", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            FrequencyText(frequency = frequencyLow, modifier = Modifier.fillMaxWidth())
+        }
         // Dash — always centered
         Text(
             text = "–",
@@ -354,11 +374,16 @@ private fun UnifiedFrequencyRow(
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.width(16.dp)
         )
-        // High frequency
-        FrequencyText(
-            frequency = frequencyHigh,
+        // Second frequency: live Doppler-corrected frequency when expanded.
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.weight(1f)
-        )
+        ) {
+            if (showBaseAndDoppler) {
+                Text("多普勒", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            FrequencyText(frequency = frequencyHigh, modifier = Modifier.fillMaxWidth())
+        }
         // Connection dot on the right
         Box(
             contentAlignment = Alignment.Center,
@@ -398,123 +423,92 @@ private fun ExpandedRadioControl(
             color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
         )
 
-        // Frequency tuner
-        if (radioControl.txBaseFrequencyHz != null) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = stringResource(R.string.radar_tx_base),
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = "${formatFrequency(radioControl.txBaseFrequencyHz)} MHz",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-                val upLow = radio.uplinkLow
-                val upHigh = radio.uplinkHigh
-                if (upLow != null && upHigh != null && upLow != upHigh) {
-                    Text(
-                        text = "(${formatFrequency(upLow)} – ${formatFrequency(upHigh)})",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    FREQ_ADJUSTMENTS.forEach { (delta, label) ->
-                        CardButton(
-                            onClick = { onAction(RadarAction.AdjustTxFrequency(delta)) },
-                            text = label,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-            }
+        // Editable nominal TX/RX base frequencies, in MHz. Applying both together
+        // preserves the exact pair entered by the user instead of rounding one through
+        // the transponder passband mapper.
+        val initialTxBase = radioControl.txBaseFrequencyHz ?: radio.uplinkLow ?: 0L
+        val initialRxBase = radioControl.rxBaseFrequencyHz
+            ?: radio.uplinkLow?.let { TransponderMapper.mapUplinkToDownlink(it, radio) }
+            ?: radio.downlinkLow ?: 0L
+        var txBaseDraft by remember(radio.uuid) { mutableStateOf(formatMHzInput(initialTxBase)) }
+        var rxBaseDraft by remember(radio.uuid) { mutableStateOf(formatMHzInput(initialRxBase)) }
+        LaunchedEffect(radio.uuid, radioControl.txBaseFrequencyHz) {
+            radioControl.txBaseFrequencyHz?.let { txBaseDraft = formatMHzInput(it) }
+        }
+        LaunchedEffect(radio.uuid, radioControl.rxBaseFrequencyHz) {
+            radioControl.rxBaseFrequencyHz?.let { rxBaseDraft = formatMHzInput(it) }
         }
 
-        // CTCSS (only for FM uplink)
-        if (radio.uplinkMode?.uppercase() == "FM") {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = "CTCSS",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    maxItemsInEachRow = 5,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    val chipModifier = Modifier.weight(1f)
-                    FilterChip(
-                        selected = radioControl.ctcssTone == null,
-                        onClick = { onAction(RadarAction.SetCtcssTone(null)) },
-                        label = {
-                            Text(
-                                text = stringResource(R.string.radar_off),
-                                fontSize = 12.sp,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        },
-                        modifier = chipModifier
-                    )
-                    RadarViewModel.CTCSS_TONES.forEach { tone ->
-                        FilterChip(
-                            selected = radioControl.ctcssTone == tone,
-                            onClick = { onAction(RadarAction.SetCtcssTone(tone)) },
-                            label = {
-                                Text(
-                                    text = String.format(Locale.ENGLISH, "%.1f", tone),
-                                    fontSize = 12.sp,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            },
-                            modifier = chipModifier
-                        )
-                    }
-                }
-            }
-        }
-
-        // Control buttons
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            if (!radioControl.txPanel.isConnected && !radioControl.rxPanel.isConnected) {
-                CardButton(
-                    onClick = { onAction(RadarAction.ConnectRadios) },
-                    text = stringResource(R.string.radar_connect),
-                    modifier = Modifier.weight(1f)
-                )
-            } else {
-                CardButton(
-                    onClick = { onAction(RadarAction.DisconnectRadios) },
-                    text = stringResource(R.string.radar_disconnect),
-                    modifier = Modifier.weight(1f)
-                )
-            }
-            CardButton(
-                onClick = { onAction(RadarAction.ToggleTracking) },
-                text = if (radioControl.isTracking) stringResource(R.string.radar_stop) else stringResource(R.string.radar_track),
-                modifier = Modifier.weight(1f)
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = "基频设置（MHz）",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.primary
             )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = txBaseDraft,
+                    onValueChange = { txBaseDraft = it },
+                    label = { Text("TX 基频") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedTextField(
+                    value = rxBaseDraft,
+                    onValueChange = { rxBaseDraft = it },
+                    label = { Text("RX 基频") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            val parsedTxBase = parseMHzInput(txBaseDraft)
+            val parsedRxBase = parseMHzInput(rxBaseDraft)
+            OutlinedButton(
+                onClick = {
+                    val txHz = parsedTxBase ?: 0
+                    val rxHz = parsedRxBase ?: return@OutlinedButton
+                    onAction(RadarAction.SetBaseFrequencies(txHz, rxHz))
+                },
+                enabled = parsedRxBase != null,
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("应用 TX/RX 基频") }
         }
+
+        // Editable TX/RX modes. The choices are the intersection supported by both
+        // controller backends in this project (FT-817 CAT and IC-705 CI-V).
+        val currentTxMode = radioControl.txPanel.mode ?: radio.uplinkMode ?: "FM"
+        val currentRxMode = radioControl.rxPanel.mode ?: radio.downlinkMode
+            ?: radio.uplinkMode?.let { TransponderMapper.mapUplinkModeToDownlinkMode(it, radio.isInverted) }
+            ?: "FM"
+        RadioModeEditor(
+            title = "发送模式",
+            selectedMode = currentTxMode,
+            modes = EDITABLE_RADIO_MODES,
+            onModeSelected = { onAction(RadarAction.SetRadioModes(it, currentRxMode)) }
+        )
+        RadioModeEditor(
+            title = "接收模式",
+            selectedMode = currentRxMode,
+            modes = EDITABLE_RX_RADIO_MODES,
+            onModeSelected = { onAction(RadarAction.SetRadioModes(currentTxMode, it)) }
+        )
+
+        CtcssToneEditor(
+            title = "发送亚音 TX CTCSS（TC，Hz，关闭发送 0）",
+            selectedToneHz = radioControl.ctcssTone,
+            onApply = { onAction(RadarAction.SetCtcssTone(it)) }
+        )
+        CtcssToneEditor(
+            title = "接收亚音 RX CTCSS（RC，Hz，关闭发送 0）",
+            selectedToneHz = radioControl.rxCtcssTone,
+            onApply = { onAction(RadarAction.SetRxCtcssTone(it)) }
+        )
+
+        // Connection and tracking buttons are intentionally hidden in this screen.
+        // Radio output/connection is configured from Data Output settings.
 
         // Error
         radioControl.errorMessage?.let { msg ->
@@ -523,6 +517,44 @@ private fun ExpandedRadioControl(
             }
         }
     }
+}
+
+
+private val EDITABLE_RADIO_MODES = listOf("FM", "USB", "LSB", "CW", "CW-R", "AM")
+private val EDITABLE_RX_RADIO_MODES = EDITABLE_RADIO_MODES + "SSTV(BY)"
+
+@Composable
+private fun RadioModeEditor(
+    title: String,
+    selectedMode: String,
+    modes: List<String> = EDITABLE_RADIO_MODES,
+    onModeSelected: (String) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp), modifier = Modifier.fillMaxWidth()) {
+        Text(title, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary)
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            modes.forEach { mode ->
+                FilterChip(
+                    selected = selectedMode.equals(mode, ignoreCase = true),
+                    onClick = { onModeSelected(mode) },
+                    label = { Text(mode, fontSize = 12.sp) }
+                )
+            }
+        }
+    }
+}
+
+private fun formatMHzInput(frequencyHz: Long): String =
+    if (frequencyHz <= 0L) "" else String.format(Locale.ENGLISH, "%.6f", frequencyHz / 1_000_000.0)
+
+private fun parseMHzInput(value: String): Long? {
+    val mhz = value.trim().replace(',', '.').toDoubleOrNull() ?: return null
+    if (!mhz.isFinite() || mhz <= 0.0 || mhz > 10_000.0) return null
+    return (mhz * 1_000_000.0).roundToLong()
 }
 
 private enum class EditedField { TX, PASSBAND, RX }
@@ -896,12 +928,81 @@ private fun FrequencyText(frequency: Long?, modifier: Modifier = Modifier) {
     )
 }
 
+@Composable
+private fun CtcssToneEditor(
+    title: String,
+    selectedToneHz: Double?,
+    onApply: (Double?) -> Unit
+) {
+    var draft by remember { mutableStateOf(selectedToneHz?.let { String.format(Locale.ENGLISH, "%.1f", it) } ?: "") }
+    LaunchedEffect(selectedToneHz) {
+        draft = selectedToneHz?.let { String.format(Locale.ENGLISH, "%.1f", it) } ?: ""
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = title,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = draft,
+                onValueChange = { draft = it },
+                label = { Text("例如 67.0") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                modifier = Modifier.weight(1f)
+            )
+            val parsedTone = draft.trim().replace(',', '.').toDoubleOrNull()
+            val toneValid = draft.isBlank() || parsedTone == 0.0 ||
+                (parsedTone != null && parsedTone.isFinite() && parsedTone in 50.0..300.0)
+            OutlinedButton(
+                onClick = { onApply(parsedTone?.takeIf { it > 0.0 }) },
+                enabled = toneValid
+            ) { Text("应用") }
+        }
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            maxItemsInEachRow = 5,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            val chipModifier = Modifier.weight(1f)
+            FilterChip(
+                selected = selectedToneHz == null,
+                onClick = { onApply(null) },
+                label = {
+                    Text(
+                        text = stringResource(R.string.radar_off),
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                },
+                modifier = chipModifier
+            )
+            RadarViewModel.CTCSS_TONES.forEach { tone ->
+                FilterChip(
+                    selected = selectedToneHz == tone,
+                    onClick = { onApply(tone) },
+                    label = {
+                        Text(
+                            text = String.format(Locale.ENGLISH, "%.1f", tone),
+                            fontSize = 12.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    },
+                    modifier = chipModifier
+                )
+            }
+        }
+    }
+}
+
 private fun transceiverTitle(radio: SatRadio): String {
     val title = if (radio.isInverted) "INV: ${radio.info}" else radio.info
     val mode = "${radio.downlinkMode ?: "--"}/${radio.uplinkMode ?: "--"}"
     return "$title ($mode)"
 }
-
-private val FREQ_ADJUSTMENTS =
-    listOf(-10_000L to "-10k", -1_000L to "-1k", -100L to "-100", 100L to "+100", 1_000L to "+1k", 10_000L to "+10k")
-

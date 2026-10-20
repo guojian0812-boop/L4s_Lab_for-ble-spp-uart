@@ -30,8 +30,12 @@ data class RadioTrackingState(
     val rxFrequencyHz: Long? = null,
     val txMode: String? = null,
     val rxMode: String? = null,
+    /** TX CTCSS tone; existing CAT behavior is kept under this property. */
     val ctcssTone: Double? = null,
+    /** RX CTCSS tone used by DTrac output; null means off. */
+    val rxCtcssTone: Double? = null,
     val txBaseFrequencyHz: Long? = null,
+    val rxBaseFrequencyHz: Long? = null,
     val selectedTransponder: SatRadio? = null,
     val currentPass: OrbitalPass? = null,
     val azimuth: Double = 0.0,
@@ -50,6 +54,9 @@ interface IRadioTrackingService {
     fun setTransponder(transponder: SatRadio)
     fun setTxBaseFrequency(frequencyHz: Long)
     fun adjustTxBaseFrequency(deltaHz: Long)
+    /** Apply editable nominal TX/RX frequencies together without losing either entered value. */
+    fun setBaseFrequencies(txFrequencyHz: Long, rxFrequencyHz: Long)
     fun setCtcssTone(toneHz: Double?)
+    fun setRxCtcssTone(toneHz: Double?)
     fun setMode(txMode: String, rxMode: String)
 }

@@ -303,29 +303,71 @@ class BluetoothReporter(
     }
 
     override fun reportFrequency(format: String, frequency: Long) {
-        val useDtrac = DtracFrequencyProtocol.isDtracFrequencyTemplate(format)
-        val asciiPayload = if (useDtrac) null else format
-            .replace("\$FREQ", frequency.toString())
-            .unescapeControlChars()
-            .toByteArray(Charsets.UTF_8)
-
+        val payload = if (DtracFrequencyProtocol.isDtracFrequencyTemplate(format)) {
+            DtracFrequencyProtocol.encodeFrequencyCommand(frequency)
+        } else {
+            format.replace("\$FREQ", frequency.toString())
+                .unescapeControlChars()
+                .toByteArray(Charsets.UTF_8)
+        }
         reporterScope.launch {
             try {
-                DtracFrequencyProtocol.sendFrequencyOutput(
+                DtracFrequencyProtocol.sendPayload(
                     owner = this@BluetoothReporter,
                     active = true,
-                    useDtrac = useDtrac,
-                    frequencyHz = frequency,
-                    asciiPayload = asciiPayload
-                ) { payload ->
-                    // sendBytes preserves the exact binary frame; it also sends ASCII bytes unchanged.
-                    frequencyTransport.sendBytes(payload)
-                    true
-                }
+                    payload = payload
+                ) { bytes -> frequencyTransport.sendBytes(bytes) }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.e(tag, "Frequency send error: ${e.message}")
+            }
+        }
+    }
+
+    override fun reportTransceiverData(
+        format: String,
+        rxFrequencyHz: Long,
+        txFrequencyHz: Long?,
+        txMode: String?,
+        rxMode: String?,
+        txCtcssToneHz: Double?,
+        rxCtcssToneHz: Double?
+    ) {
+        val isDtrac = DtracFrequencyProtocol.isDtracFrequencyTemplate(format)
+        val payloads = if (isDtrac) {
+            DtracFrequencyProtocol.encodeTransceiverCommands(
+                rxFrequencyHz = rxFrequencyHz,
+                txFrequencyHz = txFrequencyHz,
+                txMode = txMode,
+                rxMode = rxMode,
+                txCtcssToneHz = txCtcssToneHz,
+                rxCtcssToneHz = rxCtcssToneHz
+            )
+        } else {
+            listOf(
+                DtracFrequencyProtocol.formatAsciiTemplate(
+                    template = format,
+                    rxFrequencyHz = rxFrequencyHz,
+                    txFrequencyHz = txFrequencyHz,
+                    txMode = txMode,
+                    rxMode = rxMode,
+                    txCtcssToneHz = txCtcssToneHz,
+                    rxCtcssToneHz = rxCtcssToneHz
+                ).toByteArray(Charsets.UTF_8)
+            )
+        }
+        reporterScope.launch {
+            try {
+                DtracFrequencyProtocol.sendFrames(
+                    owner = this@BluetoothReporter,
+                    active = true,
+                    frames = payloads
+                ) { bytes -> frequencyTransport.sendBytes(bytes) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(tag, "DTrac command send error: ${e.message}")
             }
         }
     }

@@ -43,7 +43,7 @@ data class SerialOutputSettings(
     val rotatorState: Boolean = false,
     val rotatorFormat: String = "P \$AZ \$EL",
     val frequencyState: Boolean = false,
-    val frequencyFormat: String = "F \$FREQ"
+    val frequencyFormat: String = "F \$FREQ\nM \$MODE\nT \$FREQ_T\nTC \$CTCSS_T\nRC \$CTCSS_R"
 )
 
 /** Shared USB serial connection used by the Settings dialog, debug console and automatic telemetry. */
